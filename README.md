@@ -6,6 +6,12 @@ A powerful and intuitive tool for visualizing hierarchical folder structures, de
 
 This tool addresses the challenge of understanding complex folder hierarchies by providing an interactive, visual representation that makes it easy to navigate and understand project structures. Whether you're working with software projects, research data, engineering documentation, or any hierarchical information system, this tool helps you quickly grasp the organization and relationships between different components.
 
+## 📸 Screenshot
+
+![Folder Structure Tree Diagram](Screenshot%202025-07-04%20at%206.09.50%20PM.png)
+
+*The tree diagram shows a hierarchical folder structure with orange-highlighted focused nodes, orthogonal connections between parent and child folders, and an intuitive layout that prevents overlaps.*
+
 ## ✨ Key Features
 
 ### 🖱️ **Intuitive Navigation**
