@@ -8,7 +8,7 @@ This tool addresses the challenge of understanding complex folder hierarchies by
 
 ## 📸 Screenshot
 
-![Folder Structure Tree Diagram](Screenshot%202025-07-04%20at%206.09.50%20PM.png)
+![Folder Structure Tree Diagram](./screenshot.png)
 
 *The tree diagram shows a hierarchical folder structure with orange-highlighted focused nodes, orthogonal connections between parent and child folders, and an intuitive layout that prevents overlaps.*
 
