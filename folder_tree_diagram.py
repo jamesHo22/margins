@@ -26,13 +26,18 @@ class TreeDiagram(QWidget):
         self.node_spacing_x = 40  # Reduced from 60
         self.node_spacing_y = 80  # Reduced from 60
         self.selected_node = None
+        self.focused_node = None  # Track keyboard-focused node
         self.debug_mode = False  # Add debug mode flag
         # Create a large canvas for infinite scrolling
         self.canvas_width = 4000  # Increased from 2000
         self.canvas_height = 4000  # Increased from 2000
         self.canvas_center_x = self.canvas_width // 2
         self.canvas_center_y = self.canvas_height // 2
+        # Enable keyboard focus
+        self.setFocusPolicy(Qt.StrongFocus)
         self.build_tree()
+        # Set focus to root node initially
+        self.focused_node = self.root_node
 
     def build_tree(self):
         self.root_node = TreeNode(os.path.basename(os.path.abspath(self.root_path)), os.path.abspath(self.root_path))
@@ -237,6 +242,9 @@ class TreeDiagram(QWidget):
     def build_tree_recursive(self, path, parent_node, level):
         try:
             for entry in sorted(os.listdir(path)):
+                # Skip hidden files/folders that start with .
+                if entry.startswith('.'):
+                    continue
                 full_path = os.path.join(path, entry)
                 if os.path.isdir(full_path):  # ← This line ensures only folders are added
                     # Skip venv folder
@@ -296,8 +304,11 @@ class TreeDiagram(QWidget):
                     is_overlapping = True
                     break
         
+        # Determine node color based on state
         if is_overlapping:
             painter.setBrush(QBrush(QColor(255, 0, 0)))  # Red for overlapping nodes
+        elif node == self.focused_node:
+            painter.setBrush(QBrush(QColor(255, 165, 0)))  # Orange for focused node
         elif node == self.selected_node:
             painter.setBrush(QBrush(QColor(255, 165, 0)))  # Orange for selected
         else:
@@ -528,15 +539,226 @@ class TreeDiagram(QWidget):
         return total_length + (num_turns * 10)  # 10 points per turn
 
     def mousePressEvent(self, event):
+        # Ensure this widget gets focus when clicked
+        self.setFocus()
+        
         clicked_node = self.find_node_at(self.root_node, event.pos())
         if clicked_node:
             self.selected_node = clicked_node
+            self.focused_node = clicked_node  # Update focused node on click
             self.update()
             if event.button() == Qt.LeftButton:
+                self.show_directory_contents(clicked_node)
+            elif event.button() == Qt.RightButton:
                 self.show_context_menu(clicked_node, event.globalPos())
         else:
             self.selected_node = None
             self.update()
+
+    def keyPressEvent(self, event):
+        """Handle keyboard navigation and shortcuts"""
+        if not self.focused_node:
+            return
+            
+        if event.key() == Qt.Key_Up:
+            self.navigate_up()
+        elif event.key() == Qt.Key_Down:
+            self.navigate_down()
+        elif event.key() == Qt.Key_Left:
+            self.navigate_left()
+        elif event.key() == Qt.Key_Right:
+            self.navigate_right()
+        elif event.key() == Qt.Key_N and event.modifiers() == Qt.ControlModifier:
+            self.create_new_folder_at_focused()
+        else:
+            super().keyPressEvent(event)
+
+    def ensure_focused_node_visible(self):
+        """Ensure the focused node is visible in the scroll area"""
+        if not self.focused_node:
+            return
+            
+        # Get the parent scroll area
+        parent = self.parent()
+        while parent and not hasattr(parent, 'scroll_area'):
+            parent = parent.parent()
+            
+        if parent and hasattr(parent, 'scroll_area'):
+            scroll_area = parent.scroll_area
+            # Calculate the position of the focused node
+            node_rect = QRect(int(self.focused_node.x - self.focused_node.width//2), 
+                             int(self.focused_node.y - self.focused_node.height//2),
+                             self.focused_node.width, self.focused_node.height)
+            
+            # Ensure the node is visible in the scroll area
+            scroll_area.ensureVisible(node_rect.center().x(), node_rect.center().y(), 
+                                    node_rect.width() + 50, node_rect.height() + 50)
+
+    def navigate_up(self):
+        """Navigate to the node above the current focused node based on spatial position"""
+        if not self.focused_node:
+            return
+            
+        all_nodes = self.get_all_nodes(self.root_node)
+        best_candidate = None
+        min_distance = float('inf')
+        
+        for node in all_nodes:
+            if node == self.focused_node:
+                continue
+                
+            # Only consider nodes that are above the current node (smaller y coordinate)
+            if node.y < self.focused_node.y:
+                # Calculate horizontal distance
+                horizontal_distance = abs(node.x - self.focused_node.x)
+                vertical_distance = self.focused_node.y - node.y
+                
+                # Prefer nodes that are more directly above (smaller horizontal distance)
+                # but also consider vertical distance to avoid jumping too far
+                distance_score = horizontal_distance + (vertical_distance * 0.5)
+                
+                if distance_score < min_distance:
+                    min_distance = distance_score
+                    best_candidate = node
+        
+        if best_candidate:
+            self.focused_node = best_candidate
+            self.selected_node = self.focused_node
+            self.ensure_focused_node_visible()
+            self.update()
+
+    def navigate_down(self):
+        """Navigate to the node below the current focused node based on spatial position"""
+        if not self.focused_node:
+            return
+            
+        all_nodes = self.get_all_nodes(self.root_node)
+        best_candidate = None
+        min_distance = float('inf')
+        
+        for node in all_nodes:
+            if node == self.focused_node:
+                continue
+                
+            # Only consider nodes that are below the current node (larger y coordinate)
+            if node.y > self.focused_node.y:
+                # Calculate horizontal distance
+                horizontal_distance = abs(node.x - self.focused_node.x)
+                vertical_distance = node.y - self.focused_node.y
+                
+                # Prefer nodes that are more directly below (smaller horizontal distance)
+                # but also consider vertical distance to avoid jumping too far
+                distance_score = horizontal_distance + (vertical_distance * 0.5)
+                
+                if distance_score < min_distance:
+                    min_distance = distance_score
+                    best_candidate = node
+        
+        if best_candidate:
+            self.focused_node = best_candidate
+            self.selected_node = self.focused_node
+            self.ensure_focused_node_visible()
+            self.update()
+
+    def navigate_left(self):
+        """Navigate to the node to the left of the current focused node based on spatial position"""
+        if not self.focused_node:
+            return
+            
+        all_nodes = self.get_all_nodes(self.root_node)
+        best_candidate = None
+        min_distance = float('inf')
+        
+        for node in all_nodes:
+            if node == self.focused_node:
+                continue
+                
+            # Only consider nodes that are to the left of the current node (smaller x coordinate)
+            if node.x < self.focused_node.x:
+                # Calculate vertical distance
+                vertical_distance = abs(node.y - self.focused_node.y)
+                horizontal_distance = self.focused_node.x - node.x
+                
+                # Prefer nodes that are more directly to the left (smaller vertical distance)
+                # but also consider horizontal distance to avoid jumping too far
+                distance_score = vertical_distance + (horizontal_distance * 0.5)
+                
+                if distance_score < min_distance:
+                    min_distance = distance_score
+                    best_candidate = node
+        
+        if best_candidate:
+            self.focused_node = best_candidate
+            self.selected_node = self.focused_node
+            self.ensure_focused_node_visible()
+            self.update()
+
+    def navigate_right(self):
+        """Navigate to the node to the right of the current focused node based on spatial position"""
+        if not self.focused_node:
+            return
+            
+        all_nodes = self.get_all_nodes(self.root_node)
+        best_candidate = None
+        min_distance = float('inf')
+        
+        for node in all_nodes:
+            if node == self.focused_node:
+                continue
+                
+            # Only consider nodes that are to the right of the current node (larger x coordinate)
+            if node.x > self.focused_node.x:
+                # Calculate vertical distance
+                vertical_distance = abs(node.y - self.focused_node.y)
+                horizontal_distance = node.x - self.focused_node.x
+                
+                # Prefer nodes that are more directly to the right (smaller vertical distance)
+                # but also consider horizontal distance to avoid jumping too far
+                distance_score = vertical_distance + (horizontal_distance * 0.5)
+                
+                if distance_score < min_distance:
+                    min_distance = distance_score
+                    best_candidate = node
+        
+        if best_candidate:
+            self.focused_node = best_candidate
+            self.selected_node = self.focused_node
+            self.ensure_focused_node_visible()
+            self.update()
+
+    def create_new_folder_at_focused(self):
+        """Create a new folder under the currently focused node"""
+        if not self.focused_node:
+            return
+            
+        folder_name, ok = QInputDialog.getText(self, "Create New Folder", 
+                                             f"Enter folder name to create inside '{self.focused_node.name}':")
+        if ok and folder_name.strip():
+            try:
+                new_folder_path = os.path.join(self.focused_node.path, folder_name.strip())
+                if not os.path.exists(new_folder_path):
+                    os.makedirs(new_folder_path)
+                    self.build_tree()
+                    self.recalculate_all_positions()
+                    # Keep the same focused node after rebuild
+                    self.focused_node = self.find_node_by_path(self.root_node, self.focused_node.path)
+                    self.update()
+                else:
+                    QMessageBox.warning(self, "Error", 
+                                      f"Folder '{folder_name}' already exists in '{self.focused_node.name}'!")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", 
+                                   f"Failed to create folder: {str(e)}")
+
+    def find_node_by_path(self, node, path):
+        """Find a node by its path"""
+        if node.path == path:
+            return node
+        for child in node.children:
+            found = self.find_node_by_path(child, path)
+            if found:
+                return found
+        return None
 
     def show_context_menu(self, node, pos):
         menu = QMenu(self)
@@ -568,6 +790,45 @@ class TreeDiagram(QWidget):
         menu.addAction(properties_action)
         
         menu.exec_(pos)
+
+    def show_directory_contents(self, node):
+        """Open the native folder viewer (Finder on Mac) for the clicked directory"""
+        try:
+            import subprocess
+            import platform
+            
+            system = platform.system()
+            
+            if system == "Darwin":  # macOS
+                # Use 'open' command to open Finder
+                subprocess.run(['open', node.path])
+            elif system == "Windows":
+                # Use 'explorer' command to open Windows Explorer
+                subprocess.run(['explorer', node.path])
+            elif system == "Linux":
+                # Try common file managers on Linux
+                file_managers = ['xdg-open', 'nautilus', 'dolphin', 'thunar']
+                for fm in file_managers:
+                    try:
+                        subprocess.run([fm, node.path])
+                        break
+                    except FileNotFoundError:
+                        continue
+                else:
+                    # Fallback to xdg-open if available
+                    try:
+                        subprocess.run(['xdg-open', node.path])
+                    except FileNotFoundError:
+                        QMessageBox.warning(self, "Error", 
+                                          "No file manager found. Please install a file manager like Nautilus, Dolphin, or Thunar.")
+                        return
+            else:
+                QMessageBox.warning(self, "Error", 
+                                  f"Unsupported operating system: {system}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", 
+                               f"Failed to open folder: {str(e)}")
 
     def find_node_at(self, node, pos):
         rect = QRect(int(node.x - node.width//2), int(node.y - node.height//2), node.width, node.height)
