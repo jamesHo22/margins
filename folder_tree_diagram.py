@@ -1,22 +1,645 @@
-import sys
+#!/usr/bin/env python3
+"""
+Interactive folder tree diagram visualization using PyQt5.
+Supports both QWidget (original) and QGraphicsView (optimized) implementations.
+"""
+
 import os
+import sys
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QScrollArea, QPushButton, QInputDialog, QMessageBox,
-                             QMenu, QAction)
-from PyQt5.QtCore import Qt, QRect, QPoint, QSize
-from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QFont
+                             QPushButton, QLabel, QScrollArea, QMenu, QAction,
+                             QInputDialog, QMessageBox, QGraphicsView, QGraphicsScene,
+                             QGraphicsTextItem, QGraphicsLineItem, QGraphicsItem)
+from PyQt5.QtCore import Qt, QRect, QPoint, QTimer
+from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPainterPath
 import datetime
 
 class TreeNode:
+    """Represents a node in the tree structure"""
     def __init__(self, name, path, x=0, y=0):
         self.name = name
-        self.path = path  # Store full path
+        self.path = path
         self.x = x
         self.y = y
         self.children = []
-        self.width = 100  # Reduced from 120
+        self.parent = None
+        self.width = 120
         self.height = 40
-        self.level = 0
+        self.focused = False
+        self.selected = False
+
+class OptimizedTreeDiagram(QGraphicsView):
+    """Optimized tree diagram using QGraphicsView for better performance with large datasets"""
+    
+    def __init__(self, root_path):
+        super().__init__()
+        self.root_path = root_path
+        self.root_node = None
+        self.focused_node = None
+        self.selected_node = None
+        self.debug_mode = False
+        
+        # Setup the graphics scene
+        self.scene = QGraphicsScene()
+        self.setScene(self.scene)
+        self.setRenderHint(QPainter.Antialiasing)
+        
+        # Enable smooth scrolling
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        
+        # Store graphics items for easy access
+        self.node_items = {}  # path -> QGraphicsTextItem
+        self.connection_items = []  # list of QGraphicsLineItem
+        
+        # Build the tree
+        self.build_tree()
+        self.recalculate_all_positions()
+        
+        # Set focus policy for keyboard navigation
+        self.setFocusPolicy(Qt.StrongFocus)
+        
+    def build_tree(self):
+        """Build the tree structure from the file system"""
+        self.root_node = TreeNode(os.path.basename(self.root_path), self.root_path)
+        self.build_tree_recursive(self.root_path, self.root_node, 0)
+        
+    def build_tree_recursive(self, path, parent_node, level):
+        """Recursively build the tree structure"""
+        try:
+            items = os.listdir(path)
+            for item in sorted(items):
+                item_path = os.path.join(path, item)
+                if os.path.isdir(item_path):
+                    child_node = TreeNode(item, item_path)
+                    child_node.parent = parent_node
+                    parent_node.children.append(child_node)
+                    self.build_tree_recursive(item_path, child_node, level + 1)
+        except PermissionError:
+            pass  # Skip directories we can't access
+            
+    def recalculate_all_positions(self):
+        """Recalculate positions for all nodes"""
+        if self.root_node:
+            self.calculate_positions(self.root_node, 0, 0)
+            self.resolve_overlaps()
+            self.update_graphics_items()
+            
+    def calculate_positions(self, node, x, y):
+        """Calculate positions for a node and its children"""
+        node.x = x
+        node.y = y
+        
+        if node.children:
+            # Calculate child positions
+            child_x = x - (len(node.children) - 1) * 150 // 2
+            for child in node.children:
+                self.calculate_positions(child, child_x, y + 100)
+                child_x += 150
+                
+    def resolve_overlaps(self):
+        """Resolve overlapping nodes"""
+        all_nodes = self.get_all_nodes(self.root_node)
+        self.resolve_level_overlaps(all_nodes)
+        self.resolve_vertical_overlaps(all_nodes)
+        
+    def get_all_nodes(self, node):
+        """Get all nodes in the tree"""
+        nodes = [node]
+        for child in node.children:
+            nodes.extend(self.get_all_nodes(child))
+        return nodes
+        
+    def resolve_level_overlaps(self, all_nodes):
+        """Resolve overlaps within the same level"""
+        levels = {}
+        for node in all_nodes:
+            level = self.get_node_level(node)
+            if level not in levels:
+                levels[level] = []
+            levels[level].append(node)
+            
+        for level_nodes in levels.values():
+            if len(level_nodes) > 1:
+                level_nodes.sort(key=lambda n: n.x)
+                for i in range(1, len(level_nodes)):
+                    prev_node = level_nodes[i-1]
+                    curr_node = level_nodes[i]
+                    if curr_node.x - prev_node.x < 150:
+                        curr_node.x = prev_node.x + 150
+                        
+    def get_node_level(self, node):
+        """Get the level of a node in the tree"""
+        level = 0
+        current = node
+        while current.parent:
+            level += 1
+            current = current.parent
+        return level
+        
+    def resolve_vertical_overlaps(self, all_nodes):
+        """Resolve vertical overlaps between nodes"""
+        for i, node1 in enumerate(all_nodes):
+            for node2 in all_nodes[i+1:]:
+                if self.nodes_overlap(node1, node2):
+                    self.separate_overlapping_nodes(node1, node2)
+                    
+    def nodes_overlap(self, node1, node2):
+        """Check if two nodes overlap"""
+        return (abs(node1.x - node2.x) < 150 and 
+                abs(node1.y - node2.y) < 50)
+                
+    def separate_overlapping_nodes(self, node1, node2):
+        """Separate two overlapping nodes"""
+        if node1.y == node2.y:
+            # Same level, adjust X
+            if node1.x < node2.x:
+                node2.x = node1.x + 150
+            else:
+                node1.x = node2.x + 150
+        else:
+            # Different levels, adjust Y
+            if node1.y < node2.y:
+                node2.y = node1.y + 100
+            else:
+                node1.y = node2.y + 100
+                
+    def update_graphics_items(self):
+        """Update all graphics items in the scene"""
+        # Clear existing items
+        self.scene.clear()
+        self.node_items.clear()
+        self.connection_items.clear()
+        
+        # Add all nodes and connections
+        if self.root_node:
+            self.add_node_to_scene(self.root_node)
+            
+        # Fit the view to show all content
+        self.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        
+    def add_node_to_scene(self, node):
+        """Add a node and its connections to the scene"""
+        # Create text item for the node
+        text_item = QGraphicsTextItem(node.name)
+        text_item.setPos(node.x - node.width//2, node.y - node.height//2)
+        text_item.setDefaultTextColor(Qt.black)
+        
+        # Set background color based on node state
+        if node.focused:
+            text_item.setDefaultTextColor(Qt.white)
+            text_item.setBackground(QBrush(QColor(255, 165, 0)))  # Orange for focused
+        elif node.selected:
+            text_item.setDefaultTextColor(Qt.white)
+            text_item.setBackground(QBrush(QColor(100, 150, 255)))  # Blue for selected
+            
+        self.scene.addItem(text_item)
+        self.node_items[node.path] = text_item
+        
+        # Add connections to children
+        for child in node.children:
+            self.add_connection_to_scene(node, child)
+            self.add_node_to_scene(child)
+            
+    def add_connection_to_scene(self, parent, child):
+        """Add a connection line between parent and child"""
+        line = QGraphicsLineItem(parent.x, parent.y + parent.height//2,
+                                child.x, child.y - child.height//2)
+        line.setPen(QPen(Qt.black, 2))
+        self.scene.addItem(line)
+        self.connection_items.append(line)
+        
+    def mousePressEvent(self, event):
+        """Handle mouse press events"""
+        super().mousePressEvent(event)
+        
+        # Get the item under the mouse
+        item = self.itemAt(event.pos())
+        if item and isinstance(item, QGraphicsTextItem):
+            # Find the corresponding node
+            node = self.find_node_by_item(item)
+            if node:
+                if event.button() == Qt.LeftButton:
+                    self.show_directory_contents(node)
+                elif event.button() == Qt.RightButton:
+                    self.show_context_menu(node, event.globalPos())
+                    
+    def find_node_by_item(self, item):
+        """Find the TreeNode corresponding to a graphics item"""
+        for path, graphics_item in self.node_items.items():
+            if graphics_item == item:
+                return self.find_node_by_path(self.root_node, path)
+        return None
+        
+    def find_node_by_path(self, node, path):
+        """Find a node by its path"""
+        if node.path == path:
+            return node
+        for child in node.children:
+            found = self.find_node_by_path(child, path)
+            if found:
+                return found
+        return None
+        
+    def keyPressEvent(self, event):
+        """Handle keyboard navigation"""
+        if not self.focused_node:
+            self.focused_node = self.root_node
+            
+        if event.key() == Qt.Key_Up:
+            self.navigate_up()
+        elif event.key() == Qt.Key_Down:
+            self.navigate_down()
+        elif event.key() == Qt.Key_Left:
+            self.navigate_left()
+        elif event.key() == Qt.Key_Right:
+            self.navigate_right()
+        elif event.key() == Qt.Key_N and event.modifiers() == Qt.ControlModifier:
+            self.create_new_folder_at_focused()
+        else:
+            super().keyPressEvent(event)
+            
+    def navigate_up(self):
+        """Navigate to the node above the focused node"""
+        if not self.focused_node:
+            return
+            
+        # Find all nodes at the same level
+        level = self.get_node_level(self.focused_node)
+        same_level_nodes = [n for n in self.get_all_nodes(self.root_node) 
+                           if self.get_node_level(n) == level]
+        
+        # Find the node above
+        same_level_nodes.sort(key=lambda n: n.y)
+        current_index = same_level_nodes.index(self.focused_node)
+        if current_index > 0:
+            self.set_focused_node(same_level_nodes[current_index - 1])
+            
+    def navigate_down(self):
+        """Navigate to the node below the focused node"""
+        if not self.focused_node:
+            return
+            
+        # Find all nodes at the same level
+        level = self.get_node_level(self.focused_node)
+        same_level_nodes = [n for n in self.get_all_nodes(self.root_node) 
+                           if self.get_node_level(n) == level]
+        
+        # Find the node below
+        same_level_nodes.sort(key=lambda n: n.y)
+        current_index = same_level_nodes.index(self.focused_node)
+        if current_index < len(same_level_nodes) - 1:
+            self.set_focused_node(same_level_nodes[current_index + 1])
+            
+    def navigate_left(self):
+        """Navigate to the left sibling"""
+        if not self.focused_node or not self.focused_node.parent:
+            return
+            
+        siblings = self.focused_node.parent.children
+        current_index = siblings.index(self.focused_node)
+        if current_index > 0:
+            self.set_focused_node(siblings[current_index - 1])
+            
+    def navigate_right(self):
+        """Navigate to the right sibling"""
+        if not self.focused_node or not self.focused_node.parent:
+            return
+            
+        siblings = self.focused_node.parent.children
+        current_index = siblings.index(self.focused_node)
+        if current_index < len(siblings) - 1:
+            self.set_focused_node(siblings[current_index + 1])
+            
+    def set_focused_node(self, node):
+        """Set the focused node and update display"""
+        if self.focused_node:
+            self.focused_node.focused = False
+        self.focused_node = node
+        if node:
+            node.focused = True
+            self.ensure_focused_node_visible()
+        self.update_graphics_items()
+        
+    def ensure_focused_node_visible(self):
+        """Ensure the focused node is visible in the viewport"""
+        if self.focused_node:
+            rect = QRect(self.focused_node.x - 100, self.focused_node.y - 50, 200, 100)
+            self.ensureVisible(rect)
+            
+    def create_new_folder_at_focused(self):
+        """Create a new folder under the focused node"""
+        if not self.focused_node:
+            return
+            
+        folder_name, ok = QInputDialog.getText(self, "Create Folder", 
+                                             f"Enter folder name to create inside '{self.focused_node.name}':")
+        if ok and folder_name.strip():
+            try:
+                new_folder_path = os.path.join(self.focused_node.path, folder_name.strip())
+                if not os.path.exists(new_folder_path):
+                    os.makedirs(new_folder_path)
+                    self.build_tree()
+                    self.recalculate_all_positions()
+                else:
+                    QMessageBox.warning(self, "Error", 
+                                      f"Folder '{folder_name}' already exists!")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", 
+                                   f"Failed to create folder: {str(e)}")
+                                   
+    def show_directory_contents(self, node):
+        """Open the native folder viewer for the clicked directory"""
+        try:
+            import subprocess
+            import platform
+            
+            system = platform.system()
+            
+            if system == "Darwin":  # macOS
+                subprocess.run(['open', node.path])
+            elif system == "Windows":
+                subprocess.run(['explorer', node.path])
+            elif system == "Linux":
+                file_managers = ['xdg-open', 'nautilus', 'dolphin', 'thunar']
+                for fm in file_managers:
+                    try:
+                        subprocess.run([fm, node.path])
+                        break
+                    except FileNotFoundError:
+                        continue
+                else:
+                    try:
+                        subprocess.run(['xdg-open', node.path])
+                    except FileNotFoundError:
+                        QMessageBox.warning(self, "Error", 
+                                          "No file manager found.")
+                        return
+            else:
+                QMessageBox.warning(self, "Error", 
+                                  f"Unsupported operating system: {system}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", 
+                               f"Failed to open folder: {str(e)}")
+                               
+    def show_context_menu(self, node, pos):
+        """Show context menu for a node"""
+        menu = QMenu(self)
+        
+        # Create subfolder action
+        create_action = QAction("Create Subfolder", self)
+        create_action.triggered.connect(lambda: self.create_subfolder(node))
+        menu.addAction(create_action)
+        
+        menu.addSeparator()
+        
+        # Rename action (only for non-root nodes)
+        if node != self.root_node:
+            rename_action = QAction("Rename Folder", self)
+            rename_action.triggered.connect(lambda: self.rename_folder(node))
+            menu.addAction(rename_action)
+        
+        # Delete action (only for non-root nodes)
+        if node != self.root_node:
+            delete_action = QAction("Delete Folder", self)
+            delete_action.triggered.connect(lambda: self.delete_folder(node))
+            menu.addAction(delete_action)
+        
+        menu.addSeparator()
+        
+        # Properties action
+        properties_action = QAction("Properties", self)
+        properties_action.triggered.connect(lambda: self.show_properties(node))
+        menu.addAction(properties_action)
+
+        # Create Template action (only for non-root nodes)
+        if node != self.root_node:
+            create_template_action = QAction("Create Template", self)
+            create_template_action.triggered.connect(lambda: self.create_template_from_node(node))
+            menu.addAction(create_template_action)
+
+        # Apply Template action (only for non-root nodes)
+        if node != self.root_node:
+            apply_template_action = QAction("Apply Template", self)
+            apply_template_action.triggered.connect(lambda: self.apply_template_to_node(node))
+            menu.addAction(apply_template_action)
+        
+        menu.exec_(pos)
+        
+    def create_subfolder(self, node):
+        """Create a subfolder under the specified node"""
+        folder_name, ok = QInputDialog.getText(self, "Create Subfolder", 
+                                             f"Enter folder name to create inside '{node.name}':")
+        if ok and folder_name.strip():
+            try:
+                new_folder_path = os.path.join(node.path, folder_name.strip())
+                if not os.path.exists(new_folder_path):
+                    os.makedirs(new_folder_path)
+                    self.build_tree()
+                    self.recalculate_all_positions()
+                else:
+                    QMessageBox.warning(self, "Error", 
+                                      f"Folder '{folder_name}' already exists in '{node.name}'!")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", 
+                                   f"Failed to create folder: {str(e)}")
+                                   
+    def rename_folder(self, node):
+        """Rename a folder"""
+        new_name, ok = QInputDialog.getText(self, "Rename Folder", 
+                                          f"Enter new name for '{node.name}':",
+                                          text=node.name)
+        if ok and new_name.strip() and new_name.strip() != node.name:
+            try:
+                parent_path = os.path.dirname(node.path)
+                new_path = os.path.join(parent_path, new_name.strip())
+                if not os.path.exists(new_path):
+                    os.rename(node.path, new_path)
+                    self.build_tree()
+                    self.recalculate_all_positions()
+                else:
+                    QMessageBox.warning(self, "Error", 
+                                      f"Folder '{new_name}' already exists!")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", 
+                                   f"Failed to rename folder: {str(e)}")
+                                   
+    def delete_folder(self, node):
+        """Delete a folder"""
+        reply = QMessageBox.question(self, "Confirm Delete", 
+                                   f"Are you sure you want to delete '{node.name}' and all its contents?",
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            try:
+                import shutil
+                shutil.rmtree(node.path)
+                self.build_tree()
+                self.recalculate_all_positions()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", 
+                                   f"Failed to delete folder: {str(e)}")
+                                   
+    def show_properties(self, node):
+        """Show properties of a folder"""
+        try:
+            import stat
+            stats = os.stat(node.path)
+            size = 0
+            file_count = 0
+            dir_count = 0
+            
+            # Count files and directories
+            for root, dirs, files in os.walk(node.path):
+                dir_count += len(dirs)
+                for file in files:
+                    try:
+                        size += os.path.getsize(os.path.join(root, file))
+                        file_count += 1
+                    except:
+                        pass
+            
+            info = f"Name: {node.name}\n"
+            info += f"Path: {node.path}\n"
+            info += f"Size: {size:,} bytes\n"
+            info += f"Files: {file_count}\n"
+            info += f"Directories: {dir_count}\n"
+            info += f"Created: {stats.st_ctime}\n"
+            info += f"Modified: {stats.st_mtime}"
+            
+            QMessageBox.information(self, "Properties", info)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to get properties: {str(e)}")
+            
+    def create_template_from_node(self, node):
+        """Create a template from a folder structure"""
+        try:
+            # Create .templates directory if it doesn't exist
+            templates_dir = os.path.join(os.getcwd(), ".templates")
+            if not os.path.exists(templates_dir):
+                os.makedirs(templates_dir)
+            
+            # Get template name
+            template_name, ok = QInputDialog.getText(self, "Create Template", 
+                                                  "Enter template name:")
+            if not ok or not template_name.strip():
+                return
+                
+            template_filename = os.path.join(templates_dir, f"{template_name}.txt")
+            
+            # Get folder structure
+            structure = self.get_folder_structure(node)
+            
+            # Write template file
+            with open(template_filename, 'w') as f:
+                f.write(f"# Template: {template_name}\n")
+                f.write(f"# Created from: {node.name}\n")
+                f.write(f"# Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write(structure)
+                
+            QMessageBox.information(self, "Success", 
+                                  f"Template '{template_name}' created successfully!")
+                                  
+        except Exception as e:
+            QMessageBox.critical(self, "Error", 
+                               f"Failed to create template: {str(e)}")
+                               
+    def get_folder_structure(self, node, prefix=""):
+        """Get the folder structure as a string"""
+        result = prefix + node.name + "/\n"
+        for child in node.children:
+            result += self.get_folder_structure(child, prefix + "  ")
+        return result
+        
+    def apply_template_to_node(self, node):
+        """Apply a template to a folder"""
+        try:
+            # Get available templates
+            templates_dir = os.path.join(os.getcwd(), ".templates")
+            if not os.path.exists(templates_dir):
+                QMessageBox.warning(self, "No Templates", 
+                                  "No templates found. Create a template first.")
+                return
+                
+            template_files = [f for f in os.listdir(templates_dir) if f.endswith('.txt')]
+            if not template_files:
+                QMessageBox.warning(self, "No Templates", 
+                                  "No templates found. Create a template first.")
+                return
+                
+            # Let user select template
+            template_name, ok = QInputDialog.getItem(self, "Apply Template", 
+                                                  "Select template to apply:",
+                                                  template_files, 0, False)
+            if not ok:
+                return
+                
+            # Read template content
+            template_path = os.path.join(templates_dir, template_name)
+            with open(template_path, 'r') as f:
+                template_content = f.read()
+                
+            # Apply template
+            self.create_structure_from_template(node, template_content)
+            
+            # Refresh the tree
+            self.build_tree()
+            self.recalculate_all_positions()
+            
+            QMessageBox.information(self, "Success", 
+                                  f"Template '{template_name}' applied successfully!")
+                                  
+        except Exception as e:
+            QMessageBox.critical(self, "Error", 
+                               f"Failed to apply template: {str(e)}")
+                               
+    def create_structure_from_template(self, parent_node, template_content):
+        """Create folder structure from template content under the selected folder"""
+        lines = template_content.split('\n')
+        
+        # Find the template root name (first non-comment line)
+        template_root_name = None
+        for line in lines:
+            check_line = line.strip()
+            if check_line and not check_line.startswith('#'):
+                template_root_name = check_line.rstrip('/').strip()
+                break
+        
+        if not template_root_name:
+            return
+        
+        # Create the template root folder under the selected folder
+        template_root_path = os.path.join(parent_node.path, template_root_name)
+        if not os.path.exists(template_root_path):
+            os.makedirs(template_root_path)
+        
+        # Now process all lines to create the structure under the template root
+        level_stack = [template_root_path]
+        
+        for line in lines:
+            if not line.strip() or line.strip().startswith('#'):
+                continue
+            # Count leading spaces BEFORE stripping
+            indent = len(line) - len(line.lstrip(' '))
+            level = indent // 2
+            folder_name = line.strip().rstrip('/')
+            if level == 0:
+                continue  # already created root
+            adjusted_level = level - 1
+            while len(level_stack) <= adjusted_level:
+                level_stack.append(level_stack[-1])
+            if adjusted_level == 0:
+                current_parent = template_root_path
+            else:
+                current_parent = level_stack[adjusted_level - 1]
+            new_folder_path = os.path.join(current_parent, folder_name)
+            if not os.path.exists(new_folder_path):
+                os.makedirs(new_folder_path)
+            if adjusted_level < len(level_stack):
+                level_stack[adjusted_level] = new_folder_path
+            else:
+                level_stack.append(new_folder_path)
 
 class TreeDiagram(QWidget):
     def __init__(self, root_path):

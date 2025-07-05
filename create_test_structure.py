@@ -7,87 +7,46 @@ import os
 import sys
 
 def create_folder_structure():
-    """Create the test folder structure"""
-    
-    # Define the folder structure with text file content
-    structure = {
-        "Airframe": {
-            "Wing": {
-                "Spars": {"spar_design.txt": "Wing spar design specifications and load calculations"},
-                "Ribs": {"rib_layout.txt": "Wing rib layout and structural analysis"}
-            },
-            "Tail": {
-                "Spars": {"tail_spar_notes.txt": "Tail spar design and stress analysis"},
-                "Ribs": {"tail_rib_specs.txt": "Tail rib specifications and manufacturing notes"}
-            },
-            "Fuselage": {
-                "Frames": {"frame_design.txt": "Fuselage frame design and structural requirements"},
-                "Longeron": {"longeron_specs.txt": "Longeron specifications and load distribution"}
-            }
-        }
-    }
-    
-    def create_folders_recursive(base_path, folders):
-        """Recursively create folders and files"""
-        for folder_name, contents in folders.items():
-            folder_path = os.path.join(base_path, folder_name)
-            
-            # Create the folder if it doesn't exist
-            if not os.path.exists(folder_path):
-                os.makedirs(folder_path)
-                print(f"Created: {folder_path}")
-            else:
-                print(f"Already exists: {folder_path}")
-            
-            # Create text files in this folder
-            for filename, content in contents.items():
-                if isinstance(content, str):  # This is a file
-                    file_path = os.path.join(folder_path, filename)
-                    if not os.path.exists(file_path):
-                        with open(file_path, 'w') as f:
-                            f.write(content)
-                        print(f"  Created file: {filename}")
-                    else:
-                        print(f"  File already exists: {filename}")
-                elif isinstance(content, dict):  # This is a subfolder
-                    create_folders_recursive(folder_path, content)
-    
-    # Get the current directory
+    """Create a 20-level deep test folder structure"""
     current_dir = os.getcwd()
-    print(f"Creating folder structure in: {current_dir}")
+    print(f"Creating 20-level deep folder structure in: {current_dir}")
     print("-" * 50)
-    
-    # Create the folder structure
-    create_folders_recursive(current_dir, structure)
-    
+
+    # Build the deep path
+    deep_path = current_dir
+    for i in range(1, 21):
+        folder_name = f"Level{i}"
+        deep_path = os.path.join(deep_path, folder_name)
+        if not os.path.exists(deep_path):
+            os.makedirs(deep_path)
+            print(f"Created: {deep_path}")
+        else:
+            print(f"Already exists: {deep_path}")
+
+    # Create a file at the deepest level
+    deep_file = os.path.join(deep_path, "deep_file.txt")
+    if not os.path.exists(deep_file):
+        with open(deep_file, 'w') as f:
+            f.write("This is a file at the deepest (20th) level.")
+        print(f"  Created file: {deep_file}")
+    else:
+        print(f"  File already exists: {deep_file}")
+
     print("-" * 50)
-    print("Folder structure created successfully!")
+    print("20-level deep folder structure created successfully!")
     print("\nStructure created:")
-    print("Airframe/")
-    print("├── Wing/")
-    print("│   ├── Spars/")
-    print("│   │   └── spar_design.txt")
-    print("│   └── Ribs/")
-    print("│       └── rib_layout.txt")
-    print("├── Tail/")
-    print("│   ├── Spars/")
-    print("│   │   └── tail_spar_notes.txt")
-    print("│   └── Ribs/")
-    print("│       └── tail_rib_specs.txt")
-    print("└── Fuselage/")
-    print("    ├── Frames/")
-    print("    │   └── frame_design.txt")
-    print("    └── Longeron/")
-    print("        └── longeron_specs.txt")
+    for i in range(1, 21):
+        print("    " * (i-1) + f"Level{i}/")
+    print("    " * 20 + "deep_file.txt")
 
 def cleanup_test_structure():
     """Remove the test folder structure"""
     import shutil
     
-    airframe_path = os.path.join(os.getcwd(), "Airframe")
-    if os.path.exists(airframe_path):
-        shutil.rmtree(airframe_path)
-        print(f"Removed test structure: {airframe_path}")
+    level1_path = os.path.join(os.getcwd(), "Level1")
+    if os.path.exists(level1_path):
+        shutil.rmtree(level1_path)
+        print(f"Removed test structure: {level1_path}")
     else:
         print("No test structure found to remove.")
 
