@@ -34,6 +34,13 @@ This tool addresses the challenge of understanding complex folder hierarchies by
 - **Rename Folders**: Modify folder names with validation
 - **Delete Folders**: Remove directories with confirmation
 - **Properties View**: Detailed information about folder contents and metadata
+- **Template System**: Save and reuse folder structure templates
+
+### 📋 **Template Management**
+- **Create Templates**: Right-click any folder to save its structure as a reusable template
+- **Apply Templates**: Apply saved templates to any folder to recreate the structure
+- **Template Storage**: Templates are stored in `.templates/` directory at project root
+- **Cross-Project**: Templates can be shared and reused across different projects
 
 ### ⌨️ **Keyboard Shortcuts**
 - **↑/↓**: Navigate vertically through nodes
@@ -86,6 +93,8 @@ python folder_tree_diagram.py
 - **Rename Folder**: Change folder name (non-root nodes only)
 - **Delete Folder**: Remove directory and contents (non-root nodes only)
 - **Properties**: View detailed folder information
+- **Create Template**: Save folder structure as reusable template (non-root nodes only)
+- **Apply Template**: Apply saved template to selected folder (non-root nodes only)
 
 ## 🏗️ Architecture
 
@@ -124,6 +133,12 @@ python folder_tree_diagram.py
 - Explore media libraries and asset organization
 - Navigate through nested content structures
 - Understand information architecture
+
+### Template Management
+- Create standardized project structures
+- Maintain consistent folder organization across teams
+- Rapidly set up new projects with proven structures
+- Share best practices through reusable templates
 
 ## 🔧 Customization
 

@@ -1,0 +1,10 @@
+# Template: Atomic Hardware
+# Created from: Generic Part
+# Date: 2025-07-05 00:18:39
+
+Generic Part/
+  Analysis/
+  Manufacturing/
+  Released Parts/
+  Margins/
+

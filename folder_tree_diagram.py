@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QMenu, QAction)
 from PyQt5.QtCore import Qt, QRect, QPoint, QSize
 from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QFont
+import datetime
 
 class TreeNode:
     def __init__(self, name, path, x=0, y=0):
@@ -760,6 +761,128 @@ class TreeDiagram(QWidget):
                 return found
         return None
 
+    def create_template_from_node(self, node):
+        """Create a template from the folder structure starting at the given node"""
+        try:
+            template_name, ok = QInputDialog.getText(self, "Create Template", 
+                                                   f"Enter template name for '{node.name}':")
+            if ok and template_name.strip():
+                # Get the folder structure as a tree
+                structure = self.get_folder_structure(node)
+                
+                # Create templates directory if it doesn't exist
+                templates_dir = os.path.join(self.root_path, ".templates")
+                if not os.path.exists(templates_dir):
+                    os.makedirs(templates_dir)
+                
+                # Save template to file
+                template_file = os.path.join(templates_dir, f"{template_name.strip()}.txt")
+                with open(template_file, 'w') as f:
+                    f.write(f"# Template: {template_name.strip()}\n")
+                    f.write(f"# Created from: {node.name}\n")
+                    f.write(f"# Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                    f.write(structure)
+                
+                QMessageBox.information(self, "Template Created", 
+                                      f"Template '{template_name.strip()}' has been saved successfully!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", 
+                               f"Failed to create template: {str(e)}")
+
+    def get_folder_structure(self, node, prefix=""):
+        """Recursively get the folder structure as a text representation"""
+        structure = f"{prefix}{node.name}/\n"
+        for child in node.children:
+            structure += self.get_folder_structure(child, prefix + "  ")
+        return structure
+
+    def apply_template_to_node(self, node):
+        """Apply a template to the given node"""
+        try:
+            # Get available templates
+            templates_dir = os.path.join(self.root_path, ".templates")
+            if not os.path.exists(templates_dir):
+                QMessageBox.information(self, "No Templates", 
+                                      "No templates found. Create a template first by right-clicking a folder and selecting 'Create Template'.")
+                return
+            
+            template_files = [f for f in os.listdir(templates_dir) if f.endswith('.txt')]
+            if not template_files:
+                QMessageBox.information(self, "No Templates", 
+                                      "No templates found. Create a template first by right-clicking a folder and selecting 'Create Template'.")
+                return
+            
+            # Let user select a template
+            template_names = [os.path.splitext(f)[0] for f in template_files]
+            template_name, ok = QInputDialog.getItem(self, "Select Template", 
+                                                   "Choose a template to apply:", template_names, 0, False)
+            if ok and template_name:
+                # Read the template
+                template_file = os.path.join(templates_dir, f"{template_name}.txt")
+                with open(template_file, 'r') as f:
+                    template_content = f.read()
+                
+                # Parse and create the structure
+                self.create_structure_from_template(node, template_content)
+                
+                # Rebuild the tree
+                self.build_tree()
+                self.recalculate_all_positions()
+                self.update()
+                
+                QMessageBox.information(self, "Template Applied", 
+                                      f"Template '{template_name}' has been applied successfully!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", 
+                               f"Failed to apply template: {str(e)}")
+
+    def create_structure_from_template(self, parent_node, template_content):
+        """Create folder structure from template content under the selected folder"""
+        lines = template_content.split('\n')
+        
+        # Find the template root name (first non-comment line)
+        template_root_name = None
+        for line in lines:
+            check_line = line.strip()
+            if check_line and not check_line.startswith('#'):
+                template_root_name = check_line.rstrip('/').strip()
+                break
+        
+        if not template_root_name:
+            return
+        
+        # Create the template root folder under the selected folder
+        template_root_path = os.path.join(parent_node.path, template_root_name)
+        if not os.path.exists(template_root_path):
+            os.makedirs(template_root_path)
+        
+        # Now process all lines to create the structure under the template root
+        level_stack = [template_root_path]
+        
+        for line in lines:
+            if not line.strip() or line.strip().startswith('#'):
+                continue
+            # Count leading spaces BEFORE stripping
+            indent = len(line) - len(line.lstrip(' '))
+            level = indent // 2
+            folder_name = line.strip().rstrip('/')
+            if level == 0:
+                continue  # already created root
+            adjusted_level = level - 1
+            while len(level_stack) <= adjusted_level:
+                level_stack.append(level_stack[-1])
+            if adjusted_level == 0:
+                current_parent = template_root_path
+            else:
+                current_parent = level_stack[adjusted_level - 1]
+            new_folder_path = os.path.join(current_parent, folder_name)
+            if not os.path.exists(new_folder_path):
+                os.makedirs(new_folder_path)
+            if adjusted_level < len(level_stack):
+                level_stack[adjusted_level] = new_folder_path
+            else:
+                level_stack.append(new_folder_path)
+
     def show_context_menu(self, node, pos):
         menu = QMenu(self)
         
@@ -788,6 +911,18 @@ class TreeDiagram(QWidget):
         properties_action = QAction("Properties", self)
         properties_action.triggered.connect(lambda: self.show_properties(node))
         menu.addAction(properties_action)
+
+        # Create Template action (only for non-root nodes)
+        if node != self.root_node:
+            create_template_action = QAction("Create Template", self)
+            create_template_action.triggered.connect(lambda: self.create_template_from_node(node))
+            menu.addAction(create_template_action)
+
+        # Apply Template action (only for non-root nodes)
+        if node != self.root_node:
+            apply_template_action = QAction("Apply Template", self)
+            apply_template_action.triggered.connect(lambda: self.apply_template_to_node(node))
+            menu.addAction(apply_template_action)
         
         menu.exec_(pos)
 

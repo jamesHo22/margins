@@ -1,0 +1,7 @@
+# Template: Verification Tempalte
+# Created from: Verification Template
+# Date: 2025-07-05 00:36:16
+
+Verification Template/
+  Capability Verification/
+  Requirements/
